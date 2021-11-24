@@ -9,6 +9,8 @@
 #include "MLX90640_API.h"
 #include "MLX90640_I2C_Driver.h"
 
+#include "User_Setup_Select.h"
+
 const byte MLX90640_address = 0x33; //Default 7-bit unshifted address of the MLX90640
 
 #define TA_SHIFT 8 //Default shift for MLX90640 in open air
@@ -21,7 +23,7 @@ void setup()
   Wire.begin();
   Wire.setClock(400000); //Increase I2C clock speed to 400kHz
 
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial); //Wait for user to open terminal
   Serial.println("MLX90640 IR Array Example");
 

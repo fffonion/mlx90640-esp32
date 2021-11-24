@@ -5,13 +5,14 @@
  the 31*23 are virtual pixels.their value equal the average of around real pixels.
  ********************/
 #include <Adafruit_GFX.h>    // Core graphics library
-#include <Adafruit_ST7735.h>     
+#include <TFT_eSPI.h>
 #include <SPI.h>
 
 #include <Wire.h>
 
 #include "MLX90640_API.h"
 #include "MLX90640_I2C_Driver.h"
+#include "User_Setup_Select.h"
 
 const byte MLX90640_address = 0x33; //Default 7-bit unshifted address of the MLX90640
 #define TA_SHIFT 8 //Default shift for MLX90640 in open air
@@ -20,15 +21,10 @@ float mlx90640_virtual[63][47];   //all
 paramsMLX90640 mlx90640;
 
 
-#define TFT_CS 5 //chip select pin for the TFT screen
-#define TFT_RST 33  // you can also connect this to the Arduino reset
-                      // in which case, set this #define pin to 0!
-#define TFT_DC 32
-#define TFT_SCLK 15   // set these to be whatever pins you like!
-#define TFT_MOSI 4 
+TFT_eSPI tft = TFT_eSPI(TFT_WIDTH, TFT_HEIGHT);
   
 
- //low range of the sensor (this will be blue on the screen)
+ //low range of te sensor (this will be blue on the screen)
 float MINTEMP = 10.0;    //first run,the lower temperature.In loop fuction,the limit will be set the largest tem value.  
 
 //high range of the sensor (this will be red on the screen)
@@ -64,24 +60,41 @@ const uint16_t camColors[] = {0x480F,
 0xF1E0,0xF1C0,0xF1A0,0xF180,0xF160,0xF140,0xF100,0xF0E0,0xF0C0,0xF0A0,
 0xF080,0xF060,0xF040,0xF020,0xF800,};
 
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);  
-
 
 uint16_t displayPixelWidth, displayPixelHeight;
 
-void setup() {
-      Wire.begin();
+void setup()
+{
+  Wire.begin();
   Wire.setClock(400000); //Increase I2C clock speed to 400kHz
 
   Serial.begin(115200); //Fast serial as possible
 
-  while (!Serial); //Wait for user to open terminal
-  //Serial.println("MLX90640 IR Array Example");
+  while (!Serial)
+    ; //Wait for user to open terminal
+  Serial.println("MLX90640 IR Array Example");
+
+  Serial.println("pre tft");
+  tft.init(); // initialize a ST7735S chip, black tab
+  Serial.println(" initR");
+  tft.fillScreen(TFT_BLACK);
+  Serial.println(" fillscreen");
+
+  displayPixelWidth = tft.width() / 63;
+  displayPixelHeight = tft.width() / 63; //Keep pixels square
+
+  tft.setRotation(0);
+
+  Serial.printf(" %d x %d; %d x %d \n", tft.width(), tft.height(), displayPixelWidth, displayPixelHeight);
+
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH);
 
   if (isConnected() == false)
   {
     Serial.println("MLX90640 not detected at default I2C addres. Please check wiring. Freezing.");
-    while (1);
+    while (1)
+      ;
   }
 
   //Get device parameters - We only have to do this once
@@ -101,22 +114,12 @@ void setup() {
   MLX90640_SetRefreshRate(MLX90640_address, 0x04); //Set rate to 8Hz
   //MLX90640_SetRefreshRate(MLX90640_address, 0x05); //Set rate to 16Hz
   //MLX90640_SetRefreshRate(MLX90640_address, 0x07); //Set rate to 64Hz
-
-
-    tft.initR(INITR_144GREENTAB);   // initialize a ST7735S chip, black tab
-    tft.fillScreen(ST7735_BLACK);
-
-    displayPixelWidth = tft.width() / 63;
-    displayPixelHeight = tft.width() / 63; //Keep pixels square 
-
-    tft.setRotation(0);
-
 }
 
-void loop() {
-  
+void loop()
+{
   //read all the pixels
-  for (byte x = 0 ; x < 2 ; x++)
+  for (byte x = 0; x < 2; x++)
   {
     uint16_t mlx90640Frame[834];
     int status = MLX90640_GetFrameData(MLX90640_address, mlx90640Frame);
@@ -129,42 +132,68 @@ void loop() {
 
     MLX90640_CalculateTo(mlx90640Frame, &mlx90640, emissivity, tr, mlx90640To);
   }
-  mlx90640To[126] = mlx90640To[125];  //because the No.126 pixels is broken.The Melexis think if the sensor broken pixels'number below 4,it is qualified.You can output all data,check the broken point(the value is nan)
- 
-  for(int i = 0; i < 47; i++ ){     //the virtual pixels are created by the real pixels.
-    for(int j = 0; j < 63; j++ ){
+  mlx90640To[126] = mlx90640To[125]; //because the No.126 pixels is broken.The Melexis think if the sensor broken pixels'number below 4,it is qualified.You can output all data,check the broken point(the value is nan)
 
-    int colorTemp;
-    if(i % 2 == 0 && j % 2 == 0)
+  float min_data = 10000, max_data = 0;
+  int min_num, max_num;
+  for (int i = 0; i < 47; i++)
+  { //the virtual pixels are created by the real pixels.
+    for (int j = 0; j < 63; j++)
     {
-      mlx90640_virtual[i][j] = mlx90640To[(i/2) * 32 + (j/2)];
-    if( mlx90640To[(i/2) * 32 + (j/2)] > max_data ) {
-      max_data = mlx90640To[(i/2) * 32 + (j/2)] ;
-      max_num = i ; }
-    if( mlx90640To[(i/2) * 32 + (j/2)] < min_data ) {
-      min_data = mlx90640To[(i/2) * 32 + (j/2)] ;
-      min_num = i ; }
+
+      int colorTemp;
+      if (i % 2 == 0 && j % 2 == 0)
+      {
+        mlx90640_virtual[i][j] = mlx90640To[(i / 2) * 32 + (j / 2)];
+        if (mlx90640To[(i / 2) * 32 + (j / 2)] > max_data)
+        {
+          max_data = mlx90640To[(i / 2) * 32 + (j / 2)];
+          // Serial.printf("update max to %.2f %d,%d\n", max_data, i, j);
+          max_num = i;
+        }
+        if (mlx90640To[(i / 2) * 32 + (j / 2)] < min_data)
+        {
+          // Serial.printf("update min to %.2f %d,%d\n", max_data, i, j);
+          min_data = mlx90640To[(i / 2) * 32 + (j / 2)];
+          min_num = i;
+        }
+      }
+      // Serial.printf(" %.2f", mlx90640To[(i/2) * 32 + (j/2)]);
+      // if (i == 46) {
+      //   Serial.println("");
+      // }
+      else if (i % 2 == 0 && j % 2 != 0)
+        mlx90640_virtual[i][j] = (mlx90640To[(i / 2) * 32 + (j / 2)] + mlx90640To[(i / 2) * 32 + (j / 2)] + 1) / 2; //virtual pixels are created by 2 pixels.
+      else if (i % 2 != 0 && j % 2 == 0)
+        mlx90640_virtual[i][j] = (mlx90640To[(i / 2) * 32 + (j / 2)] + mlx90640To[(i / 2 + 1) * 32 + (j / 2)]) / 2; //virtual pixels are created by 2 pixels.
+      else
+        mlx90640_virtual[i][j] = (mlx90640To[(i / 2 - 1) * 32 + (j / 2 + 1)] + mlx90640To[(i / 2 - 1) * 32 + (j / 2 - 1)] + mlx90640To[(i / 2 + 1) * 32 + (j / 2 - 1)] + mlx90640To[(i / 2 + 1) * 32 + (j / 2 + 1)]) / 4;
+      //virtual pixels are created by 4 pixels.
+      if (mlx90640_virtual[i][j] >= MAXTEMP)
+        colorTemp = MAXTEMP;
+      else if (mlx90640_virtual[i][j] <= MINTEMP)
+        colorTemp = MINTEMP;
+      else
+        colorTemp = mlx90640_virtual[i][j];
+
+      uint8_t colorIndex = map(colorTemp, MINTEMP, MAXTEMP, 0, 255);
+
+      colorIndex = constrain(colorIndex, 0, 255);
+      //draw the pixels!
+      tft.fillRect(displayPixelHeight * i, displayPixelWidth * j, displayPixelHeight, displayPixelWidth, camColors[colorIndex]);
     }
-    else if(i % 2 == 0 && j % 2 != 0)
-    mlx90640_virtual[i][j] = ( mlx90640To[(i/2) * 32 + (j/2)] + mlx90640To[(i/2) * 32 + (j/2)] + 1) / 2;  //virtual pixels are created by 2 pixels.
-    else if(i % 2 != 0 && j % 2 == 0)
-    mlx90640_virtual[i][j] = ( mlx90640To[(i/2) * 32 + (j/2)] + mlx90640To[(i/2 + 1) * 32 + (j/2)]) / 2; //virtual pixels are created by 2 pixels.
-    else 
-    mlx90640_virtual[i][j] = ( mlx90640To[(i/2-1) * 32 + (j/2+1)] + mlx90640To[(i/2-1) * 32 + (j/2-1)]+ mlx90640To[(i/2+1) * 32 + (j/2-1)]+ mlx90640To[(i/2+1) * 32 + (j/2+1)]) / 4;
-     //virtual pixels are created by 4 pixels.
-    if(mlx90640_virtual[i][j] >= MAXTEMP) colorTemp = MAXTEMP;
-    else if(mlx90640_virtual[i][j] <= MINTEMP) colorTemp = MINTEMP;
-    else colorTemp = mlx90640_virtual[i][j];
-    
-    uint8_t colorIndex = map(colorTemp, MINTEMP, MAXTEMP, 0, 255);
-    
-    colorIndex = constrain(colorIndex, 0, 255);
-    //draw the pixels!
-    tft.fillRect(displayPixelHeight * i,displayPixelWidth * j,displayPixelHeight, displayPixelWidth, camColors[colorIndex]);
-    }    
-  } 
-    MAXTEMP = max_data;  //self-adaption.
+  }
+  MAXTEMP = max_data; //self-adaption.
   MINTEMP = min_data;
+
+  String ff = "min " + String(MINTEMP, 2);
+  String ff2 = "max " + String(MAXTEMP, 2);
+  Serial.println(ff + ff2);
+
+  tft.setTextSize(2);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString(ff, tft.width() / 2, tft.height() / 2 + 50);
+  tft.drawString(ff2, tft.width() / 2, tft.height() / 2 + 80);
 }
 //Returns true if the MLX90640 is detected on the I2C bus
 boolean isConnected()
